@@ -1,4 +1,3 @@
-#---------------------Libraries---------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,212 +7,218 @@ from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
-#----------------------------------------------------
 
-#_---------------------Page Config---------------------
+
+# Configuración de la página
 st.set_page_config(
-    page_title="Earthqueake Analysis",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)       
-#----------------------------------------------------
+    page_title="Dashboard de Análisis Sísmico",
+    page_icon="🌍",
+    layout="wide"
+)
 
-#_---------------------Title and Description---------------------
-st.title("Earthquake Analysis")
-st.write(
-    """
-    This dashboard provides an analysis of earthquake data using various visualizations and clustering techniques.
-    The data is sourced from the USGS Earthquake Catalog and includes information on earthqueake magnitude, deptg and location.
-    The dashboard allows users to explore data through interactive charts and maps, as well as perform clustering analysis.
-    """
-)   
-#----------------------------------------------------#
+# Título y descripción
+st.title("🌍 Dashboard Interactivo de Actividad Sísmica")
+st.markdown("""
+Este dashboard permite explorar datos sísmicos de un mes completo. 
+Utiliza los filtros y selectores en la barra lateral para personalizar tu análisis.
+""")
 
-#---------------------Vars in None---------------------#
-# The objective of this section is to define the variables that will be used in the app.
-
+# Variables globales para inicialización segura
 filtered_df = None
 df = None
-#----------------------------------------------------
 
-# ---------------------Load Data---------------------
+# Función para cargar datos
 @st.cache_data(ttl=3600)
 def load_data():
     try:
-        df = pd.read_csv('data/all_month.csv')
-        # Convert time column to datetime and arase the time zone
+        df = pd.read_csv("all_month.csv")
+        
+        # Convertir columnas de fecha a datetime Y ELIMINAR ZONA HORARIA
         df['time'] = pd.to_datetime(df['time']).dt.tz_localize(None)
         df['updated'] = pd.to_datetime(df['updated']).dt.tz_localize(None)
-        # aditional columns
-
+        
+        # Crear columnas adicionales útiles
         df['day'] = df['time'].dt.date
         df['hour'] = df['time'].dt.hour
-        df['day_of_the_week'] = df['time'].dt.day_name()
+        df['day_of_week'] = df['time'].dt.day_name()
         df['week'] = df['time'].dt.isocalendar().week
-        # magintude categories
+        
+        # Categorizar magnitudes
         conditions = [
             (df['mag'] < 2.0),
             (df['mag'] >= 2.0) & (df['mag'] < 4.0),
             (df['mag'] >= 4.0) & (df['mag'] < 6.0),
             (df['mag'] >= 6.0)
         ]
-        choices = ['Micro', 'Light', 'Moderate', 'Strong']
-        df['magnitude_category'] = np.select(conditions, choices, default='Unknown')
+        choices = ['Menor (<2)', 'Leve (2-4)', 'Moderado (4-6)', 'Fuerte (6+)']
+        df['magnitud_categoria'] = np.select(conditions, choices, default='No clasificado')
+        
         return df
     except Exception as e:
-
-        st.error(f"Error loading data: {e}")
+        st.error(f"Error al cargar datos: {e}")
         return None
-    
-#-----------------------day of the week transformation-----------------------------
-days_translation = {    
-    'Monday': 'Mon',
-    'Tuesday': 'Tue',
-    'Wednesday': 'Wed',
-    'Thursday': 'Thu',
-    'Friday': 'Fri',
-    'Saturday': 'Sat',
-    'Sunday': 'Sun'
-}
-#-----------------------------------------------------------------------------------
 
-#---------------------Color Scheme------------------------------
+# Traducción de días de la semana
+days_translation = {
+    'Monday': 'Lunes',
+    'Tuesday': 'Martes',
+    'Wednesday': 'Miércoles',
+    'Thursday': 'Jueves',
+    'Friday': 'Viernes',
+    'Saturday': 'Sábado',
+    'Sunday': 'Domingo'
+}
+
+# Esquema de colores para magnitudes
 magnitude_colors = {
-    'Micro': 'blue',  # Blue
-    'Light': 'green',  # Green
-    'Moderate': 'orange',  # Orange
-    'Strong': 'red'  # Red
+    'Menor (<2)': 'blue',
+    'Leve (2-4)': 'green',
+    'Moderado (4-6)': 'orange',
+    'Fuerte (6+)': 'red'
 }
-#----------------------------------------------------------------
 
-#---------------------Function to control positives sizes in markers---------------------
+# Función para asegurar tamaños positivos para marcadores
 def ensure_positive(values, min_size=3):
-    if inistance(values, (pd.Series, np.ndarray, list)):
+    if isinstance(values, (pd.Series, np.ndarray, list)):
         return np.maximum(np.abs(values), min_size)
     else:
         return max(abs(values), min_size)
-#----------------------------------------------------------------------------------------
 
-#---------------------Data Loading---------------------
+# Cargar datos
 try:
-    with st.spinner("Loading data..."):
+    with st.spinner('Cargando datos...'):
         df = load_data()
-
+        
     if df is not None and not df.empty:
-            st.sidebar.header("Data Filters") #data filters
-            min_date = df['time'].min().date() 
-            max_date = df['time'].max().date() 
-
-            # filter
-            data_range = st.sidebar.date_input("Select date range",[min_date, max_date], min_value=min_date, max_value=max_date)
-            # Transform the date range to datetime
-            if len(data_range) == 2:
-                start_date, end_date = data_range
-                start_datetime = pd.Timestamp(start_date)
-                end_datetime = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-
-                filtered_df = df[(df['time'] >= start_datetime) & (df['time'] <= end_datetime)].copy()
-
-    else
-        filtered_df = df.copy()
-
-# MAGNITUDE FILTER
-    min_mag, max_mag = st.sidebar.slider(
-        "Select magnitude range",
-        min_value=float(df['mag'].min()),
-        max_value=float(df['mag'].max()),
-        value=(float(df['mag'].min()), float(df['mag'].max())),
-        step=0.1
-    )
-    filtered_df = filtered_df[(filtered_df['mag'] >= min_mag) & (filtered_df['mag'] <= max_mag)].copy()
-
-# DEPTH FILTER
-    min_depth, max_depth = st.sidebar.slider(
-        "Select depth range",
-        min_value=float(df['depth'].min()),
-        max_value=float(df['depth'].max()),
-        value=(float(df['depth'].min()), float(df['depth'].max())),
-        step=5.0
-    )
-    filtered_df = filtered_df[(filtered_df['depth'] >= min_depth) & (filtered_df['depth'] <= max_depth)].copy()
-
-    # EVENT FILTER
-    event_types = df['type'].unique().tolist()
-    selected_types = st.sidebar.multiselect(
-        "Select event types",
-        options=event_types,
-        default=event_types
-    )
-
-# REGION FILTER
-    all_regions = sorted(df['place'].str.split(', ').str[-1].unique().tolist())
-    selected_regions = st.sidebar.multiselect(
-            "Filter by region",
+        # Sidebar para filtros
+        st.sidebar.header("Filtros")
+        
+        # Filtro de fechas
+        min_date = df['time'].min().date()
+        max_date = df['time'].max().date()
+        
+        date_range = st.sidebar.date_input(
+            "Rango de fechas",
+            [min_date, max_date],
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        # Convertir las fechas seleccionadas a datetime para filtrar
+        if len(date_range) == 2:
+            start_date, end_date = date_range
+            
+            # Convertir a objetos datetime sin zona horaria
+            start_datetime = pd.Timestamp(start_date)
+            end_datetime = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+            
+            # Filtrar el dataframe (ahora ambos son del mismo tipo)
+            filtered_df = df[(df['time'] >= start_datetime) & (df['time'] <= end_datetime)].copy()
+        else:
+            filtered_df = df.copy()
+        
+        # Filtro de magnitud
+        min_mag, max_mag = st.sidebar.slider(
+            "Rango de magnitud",
+            min_value=float(df['mag'].min()),
+            max_value=float(df['mag'].max()),
+            value=(float(df['mag'].min()), float(df['mag'].max())),
+            step=0.1
+        )
+        filtered_df = filtered_df[(filtered_df['mag'] >= min_mag) & (filtered_df['mag'] <= max_mag)]
+        
+        # Filtro de profundidad
+        min_depth, max_depth = st.sidebar.slider(
+            "Rango de profundidad (km)",
+            min_value=float(df['depth'].min()),
+            max_value=float(df['depth'].max()),
+            value=(float(df['depth'].min()), float(df['depth'].max())),
+            step=5.0
+        )
+        filtered_df = filtered_df[(filtered_df['depth'] >= min_depth) & (filtered_df['depth'] <= max_depth)]
+        
+        # Filtro de tipo de evento
+        event_types = df['type'].unique().tolist()
+        selected_types = st.sidebar.multiselect(
+            "Tipos de eventos",
+            options=event_types,
+            default=event_types
+        )
+        if selected_types:
+            filtered_df = filtered_df[filtered_df['type'].isin(selected_types)]
+        
+        # Filtro de región (opcional)
+        all_regions = sorted(df['place'].str.split(', ').str[-1].unique().tolist())
+        selected_regions = st.sidebar.multiselect(
+            "Filtrar por región",
             options=all_regions,
             default=[]
         )
         if selected_regions:
             region_mask = filtered_df['place'].str.contains('|'.join(selected_regions), case=False)
             filtered_df = filtered_df[region_mask]
-
-# COUNT EVENTS FILTERS
-    st.sidebar.metric('Selected Events', len(filtered_df))
-
-# ADVANCED OPTIONS
-    st.sidebar.markdown("---")
-    st.sidebar.header("Advanced Options")
-
-    show_cluster = st.sidebar.checkbox("Show Clustering", value=False)
-    show_advanced_charts = st.sidebar.checkbox("Show Advanced Charts", value=False)
-
-    # verify if the filtered_df is not empty
-    if len(filtered_df) == 0:
-        st.warning("No data available for the selected filters.")
-    else:
-        # principal tabs to show the data
-        main_tabs = st.tabs(["📊 General Summary", "🌐 Geographic Analysis", "⏱️ Temporal Analysis", "📈 Advanced Analysis"])
-        with main_tabs[0]:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Events", len(filtered_df))
-            col2.metric("Average Magnitude", f"{filtered_df['mag'].mean():.2f}")
-            col3.metric("Maximum Magnitude", f"{filtered_df['mag'].max():.2f}")
-            col4.metric("Average Depth", f"{filtered_df['depth'].mean():.2f} km")
-
-            # mag distribution and depth distribution
-            col_dist1, col_dist2 = st.columns(2)
-
-            with col_dist1:
-                st.subheader("Magnitude Distribution")
+        
+        # Mostrar conteo de eventos filtrados
+        st.sidebar.metric("Eventos seleccionados", len(filtered_df))
+        
+        # Opciones avanzadas en sidebar
+        st.sidebar.markdown("---")
+        st.sidebar.header("Opciones Avanzadas")
+        
+        show_clusters = st.sidebar.checkbox("Mostrar Análisis de Clusters", value=False)
+        show_advanced_charts = st.sidebar.checkbox("Mostrar Gráficos Avanzados", value=False)
+        
+        # Verificar si hay datos después de filtrar
+        if len(filtered_df) == 0:
+            st.warning("No hay datos disponibles con los filtros seleccionados. Por favor, ajuste los filtros.")
+        else:
+            # Tabs principales para organizar el dashboard
+            main_tabs = st.tabs(["📊 Resumen General", "🌐 Análisis Geográfico", "⏱️ Análisis Temporal", "📈 Análisis Avanzado"])
+            
+            # Tab 1: Resumen General
+            with main_tabs[0]:
+                # Métricas principales
+                col1, col2, col3, col4 = st.columns(4)
                 
-                fig_mag = px.histogram(
-                    filtered_df,
-                    x="mag",
-                    nbins=30,
-                    color="magnitude_category",
-                    color_discrete_map=magnitude_colors,
-                    labels={"mag": "Magnitude", "count": "Frequency"},
-                    title="Magnitude Distribution by Category"
-                )
-                fig_mag.update_layout(bargap=0.1)
-                st.plotly_chart(fig_mag, use_container_width=True)
+                col1.metric("Total Eventos", len(filtered_df))
+                col2.metric("Magnitud Promedio", f"{filtered_df['mag'].mean():.2f}")
+                col3.metric("Magnitud Máxima", f"{filtered_df['mag'].max():.2f}")
+                col4.metric("Profundidad Promedio", f"{filtered_df['depth'].mean():.2f} km")
+                
+                # Distribución de magnitudes y profundidades
+                col_dist1, col_dist2 = st.columns(2)
+                
+                with col_dist1:
+                    st.subheader("Distribución de Magnitudes")
+                    
+                    fig_mag = px.histogram(
+                        filtered_df,
+                        x="mag",
+                        nbins=30,
+                        color="magnitud_categoria",
+                        color_discrete_map=magnitude_colors,
+                        labels={"mag": "Magnitud", "count": "Frecuencia"},
+                        title="Distribución de Magnitudes por Categoría"
+                    )
+                    fig_mag.update_layout(bargap=0.1)
+                    st.plotly_chart(fig_mag, use_container_width=True)
                 
                 with col_dist2:
-                    st.subheader("Depth Distribution")
+                    st.subheader("Distribución de Profundidades")
                     
                     fig_depth = px.histogram(
                         filtered_df,
                         x="depth",
                         nbins=30,
-                        color="magnitude_category",
+                        color="magnitud_categoria",
                         color_discrete_map=magnitude_colors,
-                        labels={"depth": "Depth (km)", "count": "Frequency"},
-                        title="Depth Distribution by Magnitude Category"
+                        labels={"depth": "Profundidad (km)", "count": "Frecuencia"},
+                        title="Distribución de Profundidades por Categoría de Magnitud"
                     )
                     fig_depth.update_layout(bargap=0.1)
                     st.plotly_chart(fig_depth, use_container_width=True)
-                    
-                 # Relación Magnitud vs Profundidad
+                
+                # Relación Magnitud vs Profundidad
                 st.subheader("Relación entre Magnitud y Profundidad")
                 
                 # Asegurar valores positivos para el tamaño
@@ -1113,5 +1118,3 @@ st.sidebar.info("""
 Este dashboard muestra datos sísmicos de aproximadamente un mes de actividad.
 Desarrollado con Streamlit y Plotly Express.
 """)
-                    
-                   
